@@ -48,6 +48,15 @@ def create_app(config_class=Config):
     if should_log_startup:
         logger.info("已注册模拟进程清理函数")
     
+    # himat 身份验证中间件：从 Token 中提取 user_id 存入 g
+    from .auth import verify_himat_token
+    from flask import g as flask_g
+
+    @app.before_request
+    def extract_user_from_token():
+        user_id = verify_himat_token()
+        flask_g.user_id = user_id  # 可能为 None（未携带 Token）
+
     # 请求日志中间件
     @app.before_request
     def log_request():
@@ -62,6 +71,15 @@ def create_app(config_class=Config):
         logger.debug(f"响应: {response.status_code}")
         return response
     
+    # 初始化 MySQL 全部表（projects, simulations, tasks, operation_logs）
+    from .database import init_tables
+    if init_tables():
+        if should_log_startup:
+            logger.info("MySQL 数据库初始化成功（projects, simulations, tasks, operation_logs）")
+    else:
+        if should_log_startup:
+            logger.warning("MySQL 数据库未启用（请检查 .env 中的 MySQL 配置）")
+
     # 注册蓝图
     from .api import graph_bp, simulation_bp, report_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')

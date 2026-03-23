@@ -9,9 +9,13 @@ const service = axios.create({
   }
 })
 
-// 请求拦截器
+// 请求拦截器：自动附加 himat Token 到 Authorization 头
 service.interceptors.request.use(
   config => {
+    const token = localStorage.getItem('himat_token')
+    if (token) {
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
     return config
   },
   error => {

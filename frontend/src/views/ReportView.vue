@@ -1,43 +1,29 @@
 <template>
   <div class="main-view">
-    <!-- Header -->
-    <header class="app-header">
-      <div class="header-left">
-        <div class="brand" @click="router.push('/')">启程云志推演预测系统</div>
+    <!-- Content Toolbar -->
+    <div class="content-toolbar">
+      <div class="segmented-control">
+        <button
+          v-for="mode in ['graph', 'split', 'workbench']"
+          :key="mode"
+          class="segment-btn"
+          :class="{ active: viewMode === mode }"
+          @click="viewMode = mode"
+        >
+          {{ { graph: '图谱', split: '双栏', workbench: '工作台' }[mode] }}
+        </button>
       </div>
-      
-      <div class="header-center">
-        <div class="view-switcher">
-          <button 
-            v-for="mode in ['graph', 'split', 'workbench']" 
-            :key="mode"
-            class="switch-btn"
-            :class="{ active: viewMode === mode }"
-            @click="viewMode = mode"
-          >
-            {{ { graph: '图谱', split: '双栏', workbench: '工作台' }[mode] }}
-          </button>
-        </div>
-      </div>
-
-      <div class="header-right">
-        <div class="workflow-step">
-          <span class="step-num">Step 4/5</span>
-          <span class="step-name">报告生成</span>
-        </div>
-        <div class="step-divider"></div>
-        <span class="status-indicator" :class="statusClass">
-          <span class="dot"></span>
-          {{ statusText }}
-        </span>
-      </div>
-    </header>
+      <span class="status-indicator" :class="statusClass">
+        <span class="dot"></span>
+        {{ statusText }}
+      </span>
+    </div>
 
     <!-- Main Content Area -->
     <main class="content-area">
       <!-- Left Panel: Graph -->
       <div class="panel-wrapper left" :style="leftPanelStyle">
-        <GraphPanel 
+        <GraphPanel
           :graphData="graphData"
           :loading="graphLoading"
           :currentPhase="4"
@@ -88,7 +74,7 @@ const projectData = ref(null)
 const graphData = ref(null)
 const graphLoading = ref(false)
 const systemLogs = ref([])
-const currentStatus = ref('processing') // processing | completed | error
+const currentStatus = ref('processing')
 
 // --- Computed Layout Styles ---
 const leftPanelStyle = computed(() => {
@@ -140,27 +126,23 @@ const toggleMaximize = (target) => {
 const loadReportData = async () => {
   try {
     addLog(`加载报告数据: ${currentReportId.value}`)
-    
-    // 获取 report 信息以获取 simulation_id
+
     const reportRes = await getReport(currentReportId.value)
     if (reportRes.success && reportRes.data) {
       const reportData = reportRes.data
       simulationId.value = reportData.simulation_id
-      
+
       if (simulationId.value) {
-        // 获取 simulation 信息
         const simRes = await getSimulation(simulationId.value)
         if (simRes.success && simRes.data) {
           const simData = simRes.data
-          
-          // 获取 project 信息
+
           if (simData.project_id) {
             const projRes = await getProject(simData.project_id)
             if (projRes.success && projRes.data) {
               projectData.value = projRes.data
               addLog(`项目加载成功: ${projRes.data.project_id}`)
-              
-              // 获取 graph 数据
+
               if (projRes.data.graph_id) {
                 await loadGraph(projRes.data.graph_id)
               }
@@ -178,7 +160,7 @@ const loadReportData = async () => {
 
 const loadGraph = async (graphId) => {
   graphLoading.value = true
-  
+
   try {
     const res = await getGraphData(graphId)
     if (res.success) {
@@ -214,7 +196,7 @@ onMounted(() => {
 
 <style scoped>
 .main-view {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: #FFF;
@@ -222,89 +204,51 @@ onMounted(() => {
   font-family: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
 }
 
-/* Header */
-.app-header {
-  height: 60px;
+/* Content Toolbar */
+.content-toolbar {
+  height: 44px;
   border-bottom: 1px solid #EAEAEA;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 20px;
   background: #FFF;
-  z-index: 100;
-  position: relative;
+  flex-shrink: 0;
 }
 
-.header-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+/* Segmented Control */
+.segmented-control {
+  display: inline-flex;
+  background: #F1F5F9;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
 }
 
-.brand {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 800;
-  font-size: 18px;
-  letter-spacing: 1px;
-  cursor: pointer;
-}
-
-.view-switcher {
-  display: flex;
-  background: #F5F5F5;
-  padding: 4px;
-  border-radius: 6px;
-  gap: 4px;
-}
-
-.switch-btn {
+.segment-btn {
   border: none;
   background: transparent;
-  padding: 6px 16px;
+  padding: 5px 18px;
   font-size: 12px;
   font-weight: 600;
-  color: #666;
-  border-radius: 4px;
+  color: #64748B;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.25s ease;
+  font-family: inherit;
 }
 
-.switch-btn.active {
-  background: #FFF;
-  color: #000;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+.segment-btn:hover {
+  color: #334155;
 }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+.segment-btn.active {
+  background: #2563EB;
+  color: #FFF;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
 }
 
-.workflow-step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.step-num {
-  font-family: 'JetBrains Mono', monospace;
-  font-weight: 700;
-  color: #999;
-}
-
-.step-name {
-  font-weight: 700;
-  color: #000;
-}
-
-.step-divider {
-  width: 1px;
-  height: 14px;
-  background-color: #E0E0E0;
-}
-
+/* Status */
 .status-indicator {
   display: flex;
   align-items: center;

@@ -15,6 +15,8 @@ from ..services.simulation_manager import SimulationManager, SimulationStatus
 from ..services.simulation_runner import SimulationRunner, RunnerStatus
 from ..utils.logger import get_logger
 from ..models.project import ProjectManager
+from ..db_logger import log_action
+from ..auth import get_current_user_id
 
 logger = get_logger('mirofish.api.simulation')
 
@@ -220,13 +222,21 @@ def create_simulation():
             graph_id=graph_id,
             enable_twitter=data.get('enable_twitter', True),
             enable_reddit=data.get('enable_reddit', True),
+            user_id=get_current_user_id(),
         )
-        
+
+        # 记录操作日志
+        log_action('create_simulation', {
+            'project_id': project_id,
+            'graph_id': graph_id,
+            'simulation_id': state.simulation_id
+        })
+
         return jsonify({
             "success": True,
             "data": state.to_dict()
         })
-        
+
     except Exception as e:
         logger.error(f"创建模拟失败: {str(e)}")
         return jsonify({
@@ -239,36 +249,35 @@ def create_simulation():
 def _check_simulation_prepared(simulation_id: str) -> tuple:
     """
     检查模拟是否已经准备完成
-    
+
     检查条件：
-    1. state.json 存在且 status 为 "ready"
-    2. 必要文件存在：reddit_profiles.json, twitter_profiles.csv, simulation_config.json
-    
-    注意：运行脚本(run_*.py)保留在 backend/scripts/ 目录，不再复制到模拟目录
-    
+    1. MySQL simulations 表中 config_generated=1 且状态合法
+    2. 必要磁盘文件存在：simulation_config.json, reddit_profiles.json, twitter_profiles.csv
+
     Args:
         simulation_id: 模拟ID
-        
+
     Returns:
         (is_prepared: bool, info: dict)
     """
     import os
+    import json as _json
     from ..config import Config
-    
+    from ..database import execute_query, execute_update as _db_update
+
     simulation_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
-    
+
     # 检查目录是否存在
     if not os.path.exists(simulation_dir):
         return False, {"reason": "模拟目录不存在"}
-    
+
     # 必要文件列表（不包括脚本，脚本位于 backend/scripts/）
     required_files = [
-        "state.json",
         "simulation_config.json",
         "reddit_profiles.json",
         "twitter_profiles.csv"
     ]
-    
+
     # 检查文件是否存在
     existing_files = []
     missing_files = []
@@ -278,81 +287,88 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
             existing_files.append(f)
         else:
             missing_files.append(f)
-    
+
     if missing_files:
         return False, {
             "reason": "缺少必要文件",
             "missing_files": missing_files,
             "existing_files": existing_files
         }
-    
-    # 检查state.json中的状态
-    state_file = os.path.join(simulation_dir, "state.json")
-    try:
-        import json
-        with open(state_file, 'r', encoding='utf-8') as f:
-            state_data = json.load(f)
-        
-        status = state_data.get("status", "")
-        config_generated = state_data.get("config_generated", False)
-        
-        # 详细日志
-        logger.debug(f"检测模拟准备状态: {simulation_id}, status={status}, config_generated={config_generated}")
-        
-        # 如果 config_generated=True 且文件存在，认为准备完成
-        # 以下状态都说明准备工作已完成：
-        # - ready: 准备完成，可以运行
-        # - preparing: 如果 config_generated=True 说明已完成
-        # - running: 正在运行，说明准备早就完成了
-        # - completed: 运行完成，说明准备早就完成了
-        # - stopped: 已停止，说明准备早就完成了
-        # - failed: 运行失败（但准备是完成的）
-        prepared_statuses = ["ready", "preparing", "running", "completed", "stopped", "failed"]
-        if status in prepared_statuses and config_generated:
-            # 获取文件统计信息
-            profiles_file = os.path.join(simulation_dir, "reddit_profiles.json")
-            config_file = os.path.join(simulation_dir, "simulation_config.json")
-            
-            profiles_count = 0
-            if os.path.exists(profiles_file):
-                with open(profiles_file, 'r', encoding='utf-8') as f:
-                    profiles_data = json.load(f)
-                    profiles_count = len(profiles_data) if isinstance(profiles_data, list) else 0
-            
-            # 如果状态是preparing但文件已完成，自动更新状态为ready
-            if status == "preparing":
-                try:
-                    state_data["status"] = "ready"
-                    from datetime import datetime
-                    state_data["updated_at"] = datetime.now().isoformat()
-                    with open(state_file, 'w', encoding='utf-8') as f:
-                        json.dump(state_data, f, ensure_ascii=False, indent=2)
-                    logger.info(f"自动更新模拟状态: {simulation_id} preparing -> ready")
-                    status = "ready"
-                except Exception as e:
-                    logger.warning(f"自动更新状态失败: {e}")
-            
-            logger.info(f"模拟 {simulation_id} 检测结果: 已准备完成 (status={status}, config_generated={config_generated})")
-            return True, {
-                "status": status,
-                "entities_count": state_data.get("entities_count", 0),
-                "profiles_count": profiles_count,
-                "entity_types": state_data.get("entity_types", []),
-                "config_generated": config_generated,
-                "created_at": state_data.get("created_at"),
-                "updated_at": state_data.get("updated_at"),
-                "existing_files": existing_files
-            }
-        else:
-            logger.warning(f"模拟 {simulation_id} 检测结果: 未准备完成 (status={status}, config_generated={config_generated})")
-            return False, {
-                "reason": f"状态不在已准备列表中或config_generated为false: status={status}, config_generated={config_generated}",
-                "status": status,
-                "config_generated": config_generated
-            }
-            
-    except Exception as e:
-        return False, {"reason": f"读取状态文件失败: {str(e)}"}
+
+    # 从 MySQL 查询状态
+    rows = execute_query(
+        "SELECT `status`, `config_generated`, `entities_count`, `profiles_count`, "
+        "`entity_types`, `created_at`, `updated_at` "
+        "FROM `simulations` WHERE `simulation_id` = %s",
+        (simulation_id,)
+    )
+
+    if not rows:
+        return False, {"reason": "模拟记录不存在"}
+
+    row = rows[0]
+    status = row.get('status', '')
+    config_generated = bool(row.get('config_generated', False))
+
+    logger.debug(f"检测模拟准备状态: {simulation_id}, status={status}, config_generated={config_generated}")
+
+    prepared_statuses = ["ready", "preparing", "running", "completed", "stopped", "failed"]
+    if status in prepared_statuses and config_generated:
+        # 获取文件统计信息
+        profiles_file = os.path.join(simulation_dir, "reddit_profiles.json")
+        profiles_count = 0
+        if os.path.exists(profiles_file):
+            with open(profiles_file, 'r', encoding='utf-8') as f:
+                profiles_data = _json.load(f)
+                profiles_count = len(profiles_data) if isinstance(profiles_data, list) else 0
+
+        # 如果状态是 preparing 但文件已完成，自动更新状态为 ready
+        if status == "preparing":
+            try:
+                _db_update(
+                    "UPDATE `simulations` SET `status` = %s WHERE `simulation_id` = %s",
+                    ('ready', simulation_id)
+                )
+                logger.info(f"自动更新模拟状态: {simulation_id} preparing -> ready")
+                status = "ready"
+            except Exception as e:
+                logger.warning(f"自动更新状态失败: {e}")
+
+        # 解析 entity_types
+        entity_types_val = row.get('entity_types')
+        if isinstance(entity_types_val, str):
+            try:
+                entity_types_val = _json.loads(entity_types_val)
+            except Exception:
+                entity_types_val = []
+        elif not isinstance(entity_types_val, list):
+            entity_types_val = entity_types_val or []
+
+        created_at = row.get('created_at')
+        updated_at = row.get('updated_at')
+        if hasattr(created_at, 'isoformat'):
+            created_at = created_at.isoformat()
+        if hasattr(updated_at, 'isoformat'):
+            updated_at = updated_at.isoformat()
+
+        logger.info(f"模拟 {simulation_id} 检测结果: 已准备完成 (status={status}, config_generated={config_generated})")
+        return True, {
+            "status": status,
+            "entities_count": row.get("entities_count", 0),
+            "profiles_count": profiles_count,
+            "entity_types": entity_types_val,
+            "config_generated": config_generated,
+            "created_at": created_at,
+            "updated_at": updated_at,
+            "existing_files": existing_files
+        }
+    else:
+        logger.warning(f"模拟 {simulation_id} 检测结果: 未准备完成 (status={status}, config_generated={config_generated})")
+        return False, {
+            "reason": f"状态不在已准备列表中或config_generated为false: status={status}, config_generated={config_generated}",
+            "status": status,
+            "config_generated": config_generated
+        }
 
 
 @simulation_bp.route('/prepare', methods=['POST'])
@@ -605,7 +621,14 @@ def prepare_simulation():
         # 启动后台线程
         thread = threading.Thread(target=run_prepare, daemon=True)
         thread.start()
-        
+
+        # 记录操作日志
+        log_action('prepare_simulation', {
+            'simulation_id': simulation_id,
+            'entity_types': data.get('entity_types'),
+            'force_regenerate': force_regenerate
+        })
+
         return jsonify({
             "success": True,
             "data": {
@@ -790,9 +813,10 @@ def list_simulations():
     """
     try:
         project_id = request.args.get('project_id')
-        
+        user_id = get_current_user_id()
+
         manager = SimulationManager()
-        simulations = manager.list_simulations(project_id=project_id)
+        simulations = manager.list_simulations(project_id=project_id, user_id=user_id)
         
         return jsonify({
             "success": True,
@@ -905,9 +929,10 @@ def get_simulation_history():
     """
     try:
         limit = request.args.get('limit', 20, type=int)
-        
+        user_id = get_current_user_id()
+
         manager = SimulationManager()
-        simulations = manager.list_simulations()[:limit]
+        simulations = manager.list_simulations(user_id=user_id)[:limit]
         
         # 增强模拟数据，只从 Simulation 文件读取
         enriched_simulations = []
@@ -1092,21 +1117,23 @@ def get_simulation_profiles_realtime(simulation_id: str):
                 logger.warning(f"读取 profiles 文件失败（可能正在写入中）: {e}")
                 profiles = []
         
-        # 检查是否正在生成（通过 state.json 判断）
+        # 检查是否正在生成（从 MySQL 查询）
         is_generating = False
         total_expected = None
-        
-        state_file = os.path.join(sim_dir, "state.json")
-        if os.path.exists(state_file):
-            try:
-                with open(state_file, 'r', encoding='utf-8') as f:
-                    state_data = json.load(f)
-                    status = state_data.get("status", "")
-                    is_generating = status == "preparing"
-                    total_expected = state_data.get("entities_count")
-            except Exception:
-                pass
-        
+
+        try:
+            from ..database import execute_query as _eq
+            _rows = _eq(
+                "SELECT `status`, `entities_count` FROM `simulations` WHERE `simulation_id` = %s",
+                (simulation_id,)
+            )
+            if _rows:
+                _st = _rows[0].get('status', '')
+                is_generating = _st == "preparing"
+                total_expected = _rows[0].get('entities_count')
+        except Exception:
+            pass
+
         return jsonify({
             "success": True,
             "data": {
@@ -1187,30 +1214,31 @@ def get_simulation_config_realtime(simulation_id: str):
                 logger.warning(f"读取 config 文件失败（可能正在写入中）: {e}")
                 config = None
         
-        # 检查是否正在生成（通过 state.json 判断）
+        # 检查是否正在生成（从 MySQL 查询）
         is_generating = False
         generation_stage = None
         config_generated = False
-        
-        state_file = os.path.join(sim_dir, "state.json")
-        if os.path.exists(state_file):
-            try:
-                with open(state_file, 'r', encoding='utf-8') as f:
-                    state_data = json.load(f)
-                    status = state_data.get("status", "")
-                    is_generating = status == "preparing"
-                    config_generated = state_data.get("config_generated", False)
-                    
-                    # 判断当前阶段
-                    if is_generating:
-                        if state_data.get("profiles_generated", False):
-                            generation_stage = "generating_config"
-                        else:
-                            generation_stage = "generating_profiles"
-                    elif status == "ready":
-                        generation_stage = "completed"
-            except Exception:
-                pass
+
+        try:
+            from ..database import execute_query as _eq
+            _rows = _eq(
+                "SELECT `status`, `config_generated`, `profiles_count` FROM `simulations` WHERE `simulation_id` = %s",
+                (simulation_id,)
+            )
+            if _rows:
+                _st = _rows[0].get('status', '')
+                config_generated = bool(_rows[0].get('config_generated', False))
+                is_generating = _st == "preparing"
+
+                if is_generating:
+                    if _rows[0].get('profiles_count', 0) > 0:
+                        generation_stage = "generating_config"
+                    else:
+                        generation_stage = "generating_profiles"
+                elif _st == "ready":
+                    generation_stage = "completed"
+        except Exception:
+            pass
         
         # 构建返回数据
         response_data = {
@@ -1615,12 +1643,20 @@ def start_simulation():
         response_data['force_restarted'] = force_restarted
         if enable_graph_memory_update:
             response_data['graph_id'] = graph_id
-        
+
+        # 记录操作日志
+        log_action('start_simulation', {
+            'simulation_id': simulation_id,
+            'platform': platform,
+            'max_rounds': max_rounds,
+            'force': force
+        })
+
         return jsonify({
             "success": True,
             "data": response_data
         })
-        
+
     except ValueError as e:
         return jsonify({
             "success": False,

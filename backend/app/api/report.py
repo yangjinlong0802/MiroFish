@@ -15,6 +15,7 @@ from ..services.simulation_manager import SimulationManager
 from ..models.project import ProjectManager
 from ..models.task import TaskManager, TaskStatus
 from ..utils.logger import get_logger
+from ..db_logger import log_action
 
 logger = get_logger('mirofish.api.report')
 
@@ -173,7 +174,14 @@ def generate_report():
         # 启动后台线程
         thread = threading.Thread(target=run_generate, daemon=True)
         thread.start()
-        
+
+        # 记录操作日志
+        log_action('generate_report', {
+            'simulation_id': simulation_id,
+            'report_id': report_id,
+            'force_regenerate': force_regenerate
+        })
+
         return jsonify({
             "success": True,
             "data": {
@@ -185,7 +193,7 @@ def generate_report():
                 "already_generated": False
             }
         })
-        
+
     except Exception as e:
         logger.error(f"启动报告生成任务失败: {str(e)}")
         return jsonify({
@@ -406,8 +414,14 @@ def download_report(report_id: str):
                 "error": f"报告不存在: {report_id}"
             }), 404
         
+        # 记录操作日志
+        log_action('download_report', {
+            'report_id': report_id,
+            'simulation_id': report.simulation_id if hasattr(report, 'simulation_id') else None
+        })
+
         md_path = ReportManager._get_report_markdown_path(report_id)
-        
+
         if not os.path.exists(md_path):
             # 如果MD文件不存在，生成一个临时文件
             import tempfile

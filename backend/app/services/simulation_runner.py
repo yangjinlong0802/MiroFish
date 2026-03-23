@@ -1235,23 +1235,16 @@ class SimulationRunner:
                         state.error = "服务器关闭，模拟被终止"
                         cls._save_run_state(state)
                     
-                    # 同时更新 state.json，将状态设为 stopped
+                    # 同时更新 MySQL simulations 表，将状态设为 stopped
                     try:
-                        sim_dir = os.path.join(cls.RUN_STATE_DIR, simulation_id)
-                        state_file = os.path.join(sim_dir, "state.json")
-                        logger.info(f"尝试更新 state.json: {state_file}")
-                        if os.path.exists(state_file):
-                            with open(state_file, 'r', encoding='utf-8') as f:
-                                state_data = json.load(f)
-                            state_data['status'] = 'stopped'
-                            state_data['updated_at'] = datetime.now().isoformat()
-                            with open(state_file, 'w', encoding='utf-8') as f:
-                                json.dump(state_data, f, indent=2, ensure_ascii=False)
-                            logger.info(f"已更新 state.json 状态为 stopped: {simulation_id}")
-                        else:
-                            logger.warning(f"state.json 不存在: {state_file}")
+                        from ..database import execute_update as db_update
+                        db_update(
+                            "UPDATE `simulations` SET `status` = %s, `error` = %s WHERE `simulation_id` = %s",
+                            ('stopped', '服务器关闭，模拟被终止', simulation_id)
+                        )
+                        logger.info(f"已更新 simulations 表状态为 stopped: {simulation_id}")
                     except Exception as state_err:
-                        logger.warning(f"更新 state.json 失败: {simulation_id}, error={state_err}")
+                        logger.warning(f"更新 simulations 表失败: {simulation_id}, error={state_err}")
                         
             except Exception as e:
                 logger.error(f"清理进程失败: {simulation_id}, error={e}")

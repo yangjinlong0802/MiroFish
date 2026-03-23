@@ -17,6 +17,8 @@ from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
+from ..db_logger import log_action
+from ..auth import get_current_user_id
 
 # 获取日志器
 logger = get_logger('mirofish.api')
@@ -57,7 +59,8 @@ def list_projects():
     列出所有项目
     """
     limit = request.args.get('limit', 50, type=int)
-    projects = ProjectManager.list_projects(limit=limit)
+    user_id = get_current_user_id()
+    projects = ProjectManager.list_projects(limit=limit, user_id=user_id)
     
     return jsonify({
         "success": True,
@@ -172,7 +175,7 @@ def generate_ontology():
             }), 400
         
         # 创建项目
-        project = ProjectManager.create_project(name=project_name)
+        project = ProjectManager.create_project(name=project_name, user_id=get_current_user_id())
         project.simulation_requirement = simulation_requirement
         logger.info(f"创建项目: {project.project_id}")
         
@@ -234,6 +237,13 @@ def generate_ontology():
         ProjectManager.save_project(project)
         logger.info(f"=== 本体生成完成 === 项目ID: {project.project_id}")
         
+        # 记录操作日志
+        log_action('generate_ontology', {
+            'project_id': project.project_id,
+            'project_name': project.name,
+            'simulation_requirement': simulation_requirement[:200]
+        })
+
         return jsonify({
             "success": True,
             "data": {
@@ -245,7 +255,7 @@ def generate_ontology():
                 "total_text_length": project.total_text_length
             }
         })
-        
+
     except Exception as e:
         return jsonify({
             "success": False,
@@ -506,7 +516,15 @@ def build_graph():
         # 启动后台线程
         thread = threading.Thread(target=build_task, daemon=True)
         thread.start()
-        
+
+        # 记录操作日志
+        log_action('build_graph', {
+            'project_id': project_id,
+            'task_id': task_id,
+            'graph_name': graph_name,
+            'chunk_size': chunk_size
+        })
+
         return jsonify({
             "success": True,
             "data": {
@@ -515,7 +533,7 @@ def build_graph():
                 "message": "图谱构建任务已启动，请通过 /task/{task_id} 查询进度"
             }
         })
-        
+
     except Exception as e:
         return jsonify({
             "success": False,

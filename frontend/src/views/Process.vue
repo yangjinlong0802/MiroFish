@@ -1,20 +1,12 @@
 <template>
   <div class="process-page">
-    <!-- 顶部导航栏 -->
-    <nav class="navbar">
-      <div class="nav-brand" @click="goHome">启程云志推演预测系统</div>
-      
-      <!-- 中间步骤指示器 -->
-      <div class="nav-center">
-        <div class="step-badge">STEP 01</div>
-        <div class="step-name">图谱构建</div>
-      </div>
-
-      <div class="nav-status">
+    <!-- 状态栏 -->
+    <div class="process-toolbar">
+      <div class="toolbar-left">
         <span class="status-dot" :class="statusClass"></span>
         <span class="status-text">{{ statusText }}</span>
       </div>
-    </nav>
+    </div>
 
     <!-- 主内容区 -->
     <div class="main-content">
@@ -1102,63 +1094,27 @@ onUnmounted(() => {
 }
 
 .process-page {
-  min-height: 100vh;
+  height: 100%;
   background: var(--white);
   font-family: 'JetBrains Mono', 'Noto Sans SC', monospace;
-  overflow: hidden; /* Prevent body scroll in fullscreen */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* 导航栏 */
-.navbar {
+/* 状态栏 */
+.process-toolbar {
+  height: 40px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 0 24px;
-  height: 56px;
-  background: #000;
-  color: #fff;
-  z-index: 10;
-  position: relative;
+  border-bottom: 1px solid #E0E0E0;
+  background: #FFF;
+  flex-shrink: 0;
 }
 
-.nav-brand {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.nav-brand:hover {
-  opacity: 0.8;
-}
-
-.nav-center {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.step-badge {
-  background: #2563EB;
-  color: #fff;
-  padding: 2px 8px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  border-radius: 2px;
-}
-
-.step-name {
-  font-size: 0.85rem;
-  letter-spacing: 0.05em;
-  color: #fff;
-}
-
-.nav-status {
+.toolbar-left {
   display: flex;
   align-items: center;
 }
@@ -1197,8 +1153,9 @@ onUnmounted(() => {
 /* 主内容区 */
 .main-content {
   display: flex;
-  height: calc(100vh - 56px);
+  flex: 1;
   position: relative;
+  overflow: hidden;
 }
 
 /* 左侧面板 - 50% default */

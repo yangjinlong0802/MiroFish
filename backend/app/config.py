@@ -34,6 +34,17 @@ class Config:
     
     # Zep配置
     ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
+
+    # MySQL配置（himat 用户操作日志）
+    MYSQL_HOST = os.environ.get('MYSQL_HOST', '127.0.0.1')
+    MYSQL_PORT = int(os.environ.get('MYSQL_PORT', '3306'))
+    MYSQL_USER = os.environ.get('MYSQL_USER', 'root')
+    MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', '')
+    MYSQL_DB = os.environ.get('MYSQL_DB', 'himat_logs')
+
+    # himat 鉴权配置
+    HIMAT_AUTH_URL = os.environ.get('HIMAT_AUTH_URL', '')
+    JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key')
     
     # 文件上传配置
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
